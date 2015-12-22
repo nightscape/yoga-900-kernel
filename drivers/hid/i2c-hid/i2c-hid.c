@@ -352,13 +352,24 @@ static int i2c_hid_set_power(struct i2c_client *client, int power_state)
 static int i2c_hid_hwreset(struct i2c_client *client)
 {
 	struct i2c_hid *ihid = i2c_get_clientdata(client);
+	bool started;
 	int ret;
 
 	i2c_hid_dbg(ihid, "%s\n", __func__);
 
+	/*
+	 * Some touchpads seem to send input reports once their power is
+	 * turned back on after resume. This confuses our reset logic
+	 * below.
+	 *
+	 * Prevent handling any input reports while we are resetting the
+	 * device.
+	 */
+	started = test_and_clear_bit(I2C_HID_STARTED, &ihid->flags);
+
 	ret = i2c_hid_set_power(client, I2C_HID_PWR_ON);
 	if (ret)
-		return ret;
+		goto out;
 
 	i2c_hid_dbg(ihid, "resetting...\n");
 
@@ -366,10 +377,14 @@ static int i2c_hid_hwreset(struct i2c_client *client)
 	if (ret) {
 		dev_err(&client->dev, "failed to reset device.\n");
 		i2c_hid_set_power(client, I2C_HID_PWR_SLEEP);
-		return ret;
+		goto out;
 	}
 
-	return 0;
+out:
+	if (started)
+		set_bit(I2C_HID_STARTED, &ihid->flags);
+
+	return ret;
 }
 
 static void i2c_hid_get_input(struct i2c_hid *ihid)
